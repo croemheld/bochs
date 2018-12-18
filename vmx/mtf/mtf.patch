@@ -1,0 +1,67 @@
+diff -ur --ignore-all-space bochs-2.6.9-patched/cpu/cpu.cc bochs-2.6.9/cpu/cpu.cc
+--- bochs-2.6.9-patched/cpu/cpu.cc	2016-02-22 20:57:24.305541000 +0100
++++ bochs-2.6.9/cpu/cpu.cc	2018-12-17 17:30:35.035718984 +0100
+@@ -60,6 +60,20 @@
+   BX_CPU_THIS_PTR prev_rip = RIP; // commit new EIP
+   BX_CPU_THIS_PTR speculative_rsp = 0;
+ 
++  if(BX_CPU_THIS_PTR in_vmx_guest && BX_SUPPORT_VMX_EXTENSION(BX_VMX_MONITOR_TRAP_FLAG)) {
++    // Toggle value of in_vmx_single_stepping_mode to execute the next instruction
++    if(BX_CPU_THIS_PTR vmx_single_stepping_enabled) {
++      if(!BX_CPU_THIS_PTR in_vmx_single_stepping_mode) {
++        BX_CPU_THIS_PTR in_vmx_single_stepping_mode = 1;
++        BX_ERROR(("Single Stepping Mode enabled"));
++      } else {
++        BX_CPU_THIS_PTR in_vmx_single_stepping_mode = 0;
++        BX_ERROR(("Single Stepping Mode VM exit"));
++        VMexit(VMX_VMEXIT_MONITOR_TRAP_FLAG, 0);
++      }
++    }
++  }
++
+   while (1) {
+ 
+     // check on events which occurred for previous instructions (traps)
+diff -ur --ignore-all-space bochs-2.6.9-patched/cpu/cpudb/intel/corei7_haswell_4770.cc bochs-2.6.9/cpu/cpudb/intel/corei7_haswell_4770.cc
+--- bochs-2.6.9-patched/cpu/cpudb/intel/corei7_haswell_4770.cc	2017-03-26 22:12:14.380760000 +0200
++++ bochs-2.6.9/cpu/cpudb/intel/corei7_haswell_4770.cc	2018-12-17 14:51:13.190949748 +0100
+@@ -182,7 +182,7 @@
+          BX_VMX_VIRTUAL_NMI |
+          BX_VMX_APIC_VIRTUALIZATION |
+          BX_VMX_WBINVD_VMEXIT |
+-      /* BX_VMX_MONITOR_TRAP_FLAG | */ // not implemented yet
++         BX_VMX_MONITOR_TRAP_FLAG |
+          BX_VMX_VPID |
+          BX_VMX_EPT |
+          BX_VMX_UNRESTRICTED_GUEST |
+diff -ur --ignore-all-space bochs-2.6.9-patched/cpu/cpu.h bochs-2.6.9/cpu/cpu.h
+--- bochs-2.6.9-patched/cpu/cpu.h	2017-03-30 23:53:39.479163000 +0200
++++ bochs-2.6.9/cpu/cpu.h	2018-12-17 16:16:49.662161484 +0100
+@@ -1089,6 +1089,8 @@
+ #if BX_SUPPORT_VMX
+   bx_bool in_vmx;
+   bx_bool in_vmx_guest;
++  bx_bool vmx_single_stepping_enabled;
++  bx_bool in_vmx_single_stepping_mode;
+   bx_bool in_smm_vmx; // save in_vmx and in_vmx_guest flags when in SMM mode
+   bx_bool in_smm_vmx_guest;
+   Bit64u  vmcsptr;
+diff -ur --ignore-all-space bochs-2.6.9-patched/cpu/vmx.cc bochs-2.6.9/cpu/vmx.cc
+--- bochs-2.6.9-patched/cpu/vmx.cc	2017-03-16 21:23:49.223833000 +0100
++++ bochs-2.6.9/cpu/vmx.cc	2018-12-17 16:17:04.274129799 +0100
+@@ -761,6 +761,15 @@
+      }
+   }
+ 
++  // Monitor Trap Flag for single stepping in guest
++  if(BX_SUPPORT_VMX_EXTENSION(BX_VMX_MONITOR_TRAP_FLAG)) {
++    if(vm->vmexec_ctrls2 & VMX_VM_EXEC_CTRL2_MONITOR_TRAP_FLAG) {
++      BX_CPU_THIS_PTR vmx_single_stepping_enabled = 1;
++    } else {
++      BX_CPU_THIS_PTR vmx_single_stepping_enabled = 0;
++    }
++  }
++
+   //
+   // Load VM-exit control fields to VMCS Cache
+   //
